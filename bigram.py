@@ -5,7 +5,7 @@ from torch.nn import functional as F
 # hyperparameters
 batch_size=32
 block_size=8
-max_iters=3000
+max_iters=1000
 eval_interval = 100#这个参数用于？
 learning_rate = 1e-3
 device = 'cuda' if torch.cuda.is_available() else 'cpu'
@@ -14,6 +14,7 @@ embedding_dim=64
 num_heads=4
 num_layers=4
 dropout_rate=0.0
+n_embd=32#number of embedding
 
 # Set the random seed for reproduciblity
 torch.manual_seed(1337)
@@ -38,7 +39,7 @@ decode = lambda l:''.join([itos[i] for i in l])#解码器实现
 data = torch.tensor(encode(text), dtype=torch.long)
 train_size = int(0.9*len(data))
 train_data = data[:train_size]#可复用划分技巧
-val_data = data[train_data:]
+val_data = data[train_size:]
 
 
 # data loading
@@ -72,17 +73,24 @@ def estimate_loss():
 
 # super simple bigram model
 class BigramLanguageModel(nn.Module):
-    def __init__(self, vocab_size):
+    def __init__(self):
         super().__init__()
         # each token directly reads off the logits for the next token from a lookup table
         # token embedding table -> 标记嵌入表,例如上述tensor中[[0,24,43,...],[...]..];
         # 值为24的元素将在嵌入表中找到第24行，然后呢...?
         # nn.Embedding -> 一个非常薄的包装器，基本上是一个形状为vocab_size*vocab_size的张量
-        self.token_embedding_table = nn.Embedding(vocab_size, vocab_size)
+        self.token_embedding_table = nn.Embedding(vocab_size, n_embd)
+        self.positional_embedding_table = nn.Embedding(block_size, n_embd)#位置编码表 为什么是block_size, n_embd
+        self.lm_head = nn.Linear(n_embd, vocab_size)  # linear layer（线性层），从标记嵌入转到对数
 
     def forward(self, idx, targets=None):  # 这是一个封装起来的强制函数
+        B,T = idx.shape
         # idx and targets are both (B,T) tensor of integers
-        logits = self.token_embedding_table(idx)  # （B,T,C),在本例中,B(batch)批次为4，T(time)为8，C(chanel)为vocabSize即65
+        tok_emb = self.token_embedding_table(idx)  # （B,T,C),在本例中,B(batch)批次为4，T(time)为8，C(chanel)为vocabSize即65
+        pos_emb = self.positional_embedding_table(torch.arrange(T,device=device))#位置编码
+        x = tok_emb + pos_emb
+        logits = self.lm_head(tok_emb)#(B,T,vocab_size)
+
         if targets is None:
             loss = None
         else:
@@ -116,4 +124,22 @@ class BigramLanguageModel(nn.Module):
             idx = torch.cat((idx, idx_next), dim=1)
         return idx
 
+# Create Model
+model = BigramLanguageModel()
+# Create Optimizer
+optimizer = torch.optim.AdamW(model.parameters(), lr=1e-3)
 
+for steps in range(max_iters):
+    # sample a batch of data
+    xb, yb = get_batch('train')
+
+    ###经典的训练循环
+    # evalulate the loss
+    logits, loss = model(xb, yb)
+    # 将所有梯度归零->why?
+    optimizer.zero_grad(set_to_none=True)
+    loss.backward()  # 获取所有参数的梯度
+    optimizer.step()  # 使用这些梯度来更新我们的参数
+    # print(loss.item())
+print(loss.item())  # 该优化过程非常不稳定
+print(decode(model.generate(idx=torch.zeros((1, 1), dtype=torch.long), max_new_tokens=100)[0].tolist()))
