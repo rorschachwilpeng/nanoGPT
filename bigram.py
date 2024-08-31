@@ -1,6 +1,7 @@
 import torch
 import torch.nn as nn
 from torch.nn import functional as F
+#水一个commit
 
 # hyperparameters
 #batch代表的难道不是多个句子的组合吗
