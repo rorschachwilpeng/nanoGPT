@@ -1,47 +1,22 @@
-import torch
 import torch.nn as nn
 from torch.nn import functional as F
+import torch
+import config as mp
 
-# hyperparameters
-#batch代表的难道不是多个句子的组合吗
-#嵌入层，batch_size,block_size之间的关系是什么？它们分别代表什么？
-batch_size=32#how many independent sequences will we process in parallel? (Batch Dimension)
-block_size=8#what is the maximum context length for prediction (Time Dimension)
-max_iters=1000
-eval_interval = 100#这个参数用于？
-learning_rate = 1e-3
-device = 'cuda' if torch.cuda.is_available() else 'cpu'
-eval_iters=200#迭代次数
-embedding_dim=64
-num_heads=6
-num_layers=6
-dropout=0.2#每个前向、后向，超过20%的所有这些中间计算都被禁用并降至0
-n_embd=12#number of embedding (channel)
+n_embd=mp.n_embd
+block_size=mp.block_size
+dropout=mp.dropout
+num_heads=mp.num_heads
+num_layers=mp.num_layers
 
-# batch_size=64#how many independent sequences will we process in parallel?
-# block_size=256#what is the maximum context length for prediction
-# max_iters=100
-# eval_interval = 500#这个参数用于？
-# learning_rate = 3e-4
-# device = 'cuda' if torch.cuda.is_available() else 'cpu'
-# eval_iters=200#迭代次数
-# embedding_dim=384
-# num_heads=6
-# num_layers=6
-# dropout=0.2#每个前向、后向，超过20%的所有这些中间计算都被禁用并降至0
-# n_embd=384#number of embedding
-
+###Stupid Refactoring
 # Set the random seed for reproduciblity
 torch.manual_seed(1337)
-
 # Load dataset
-with open('data/shakespeare_input.txt','r', encoding='utf-8') as f:
+with open('../data/shakespeare_input.txt','r', encoding='utf-8') as f:
     text=f.read()
 
 # Character mappings(简单分词器实现)
-'''
-将所有出现过的字符重排序，映射成数字，存储在数组中（哈希表实现）
-'''
 chars=sorted(list(set(text)))#去重和排序
 vocab_size=len(chars)
 stoi={ch:i for i,ch in enumerate(chars)}
@@ -55,36 +30,8 @@ data = torch.tensor(encode(text), dtype=torch.long)
 train_size = int(0.9*len(data))
 train_data = data[:train_size]#可复用划分技巧
 val_data = data[train_size:]
+###
 
-
-# data loading
-def get_batch(split):
-    # generate a small batch of data of input x and targets y
-    data= train_data if split=='train' else val_data
-
-    # 在合理范围内，随机生成batch_size个sequence(每个sequence长度为block_size)
-    ix = torch.randint(len(data)-block_size, (batch_size,))
-    x = torch.stack([data[i:i+block_size] for i in ix])
-    y = torch.stack([data[i+1:i+block_size+1] for i in ix])#为什么y是i+1:block_size+1
-    #x,y = x.to(device), y.to(device)#将数据放到GPU上
-    return x,y
-
-@torch.no_grad()#上下文管理器,告诉PyTorch，我们不会调用.backward来处理此函数内部发生的所有事情（没懂）
-def estimate_loss():
-    out={}
-    model.eval()#评估阶段
-
-    # 通过平均计算batch平均，减少loss计算的噪音
-    for split in['train','val']:
-        losses=torch.zeros(eval_iters)#待检验，torch.zeros(..)会生成什么->一个长为eval_iters,值全为0的数组
-        for k in range(eval_iters):
-            X, y = get_batch(split)
-            logits, loss = model(X, y)
-            losses[k] = loss.item()
-        out[split] = losses.mean()
-
-    model.train()#训练阶段
-    return out
 
 class Head(nn.Module):
     """ one head of self-attention """
@@ -160,7 +107,7 @@ class Block(nn.Module):
         return x
 
 # super simple bigram model
-class BigramLanguageModel(nn.Module):
+class nanoGPT(nn.Module):
     def __init__(self):
         super().__init__()
         # each token directly reads off the logits for the next token from a lookup table
@@ -184,7 +131,7 @@ class BigramLanguageModel(nn.Module):
         B,T = idx.shape
         # idx and targets are both (B,T) tensor of integers
         tok_emb = self.token_embedding_table(idx)  # （B,T,C),在本例中,B(batch)批次为4，T(time)为8，C(chanel)为vocabSize即65
-        pos_emb = self.positional_embedding_table(torch.arange(T,device=device))#位置编码
+        pos_emb = self.positional_embedding_table(torch.arange(T,device=mp.device))#位置编码
         x = tok_emb + pos_emb
         #x = self.sa_heads(x)#apple mutiple heads of self-attention, (B,T,C)
         x = self.blocks(x)
@@ -225,30 +172,3 @@ class BigramLanguageModel(nn.Module):
             # append sampled index to the running sequence
             idx = torch.cat((idx, idx_next), dim=1)
         return idx
-
-# Create Model
-model = BigramLanguageModel()
-# Create Optimizer
-optimizer = torch.optim.AdamW(model.parameters(), lr=learning_rate)
-
-
-for iter in range(max_iters):
-    # every once in a while evaluate the loss on train and val sets
-    if iter % eval_interval==0 or iter == max_iters-1:
-        losses = estimate_loss()
-        print(f"step {iter}: train loss: {losses['train']:.4f}, val loss: {losses['val']:.4f}")
-    # sample a batch of data
-    xb, yb = get_batch('train')
-
-    ###经典的训练循环
-    # evalulate the loss
-    logits, loss = model(xb, yb)
-    # 将所有梯度归零->why?
-    optimizer.zero_grad(set_to_none=True)
-    loss.backward()  # 获取所有参数的梯度
-    optimizer.step()  # 使用这些梯度来更新我们的参数
-
-# generate from the model
-context=torch.zeros((1, 1), dtype=torch.long)
-output = decode(model.generate(context, max_new_tokens=100)[0].tolist())
-print(output)
