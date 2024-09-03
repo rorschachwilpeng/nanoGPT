@@ -9,7 +9,7 @@ dropout=mp.dropout
 num_heads=mp.num_heads
 num_layers=mp.num_layers
 
-###Stupid Refactoring
+###Dummy Refactoring
 # Set the random seed for reproduciblity
 torch.manual_seed(1337)
 # Load dataset
